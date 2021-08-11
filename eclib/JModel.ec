@@ -458,6 +458,14 @@ abbrev [-printing] VPMULHRS_8u16 = VPMULHRSW_128.
 abbrev [-printing] VPMULHRS_16u16 = VPMULHRSW_256.
 
 (* ------------------------------------------------------------------- *)
+(* FIXME *)
+op VPMOVZX_8u16_8u32 (w: W128.t) =
+  pack8 (map W2u16.zeroextu32 (W8u16.to_list w)).
+
+op VPMOVSX_8u16_8u32 (w: W128.t) =
+  pack8 (map W2u16.sigextu32 (W8u16.to_list w)).
+
+(* ------------------------------------------------------------------- *)
 (* AES instruction *)
 
 abbrev [-printing] VAESDEC          = AESDEC.
