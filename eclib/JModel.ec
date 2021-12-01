@@ -270,6 +270,11 @@ op packus_4u32 (w: W256.t, off: int) : W64.t =
 op VPACKUS_8u32 (w1 w2: W256.t) : W256.t =
   pack4 [packus_4u32 w1 0; packus_4u32 w2 0; packus_4u32 w1 4; packus_4u32 w2 4].
 
+op packus16 (w: W16.t): W8.t = 
+  if w \slt W16.zero then W8.zero
+  else if (W16.of_int W8.max_uint) \sle w then (W8.of_int W8.max_uint)
+  else (w \bits8 0).
+
 op packus_8u16 (w: W256.t, off: int) : W64.t =
   let pack = fun n =>
   if (w \bits16 n) \slt W16.zero then W8.zero
@@ -282,6 +287,11 @@ op VPACKUS_16u16 (w1 w2: W256.t) : W256.t =
   pack4 [packus_8u16 w1 0; packus_8u16 w2 0; packus_8u16 w1 8; packus_8u16 w2 8].
 
 (* ------------------------------------------------------------------- *)
+op packss16 (w: W16.t): W8.t =
+  if w \slt (W16.of_int W8.min_sint) then (W8.of_int W8.min_sint)
+  else if (W16.of_int W8.max_sint) \sle w then (W8.of_int W8.max_sint)
+  else w \bits8 0.
+
 op packss_8u16 (w: W256.t, off: int) : W64.t =
   let pack = fun n =>
   if (w \bits16 n) \slt (W16.of_int W8.min_sint) then (W8.of_int W8.min_sint)
@@ -350,7 +360,7 @@ op VPBLENDW_128 (w1 w2: W128.t) (i: W8.t) : W128.t =
 
 op VPBLENDW_256 (w1 w2: W256.t) (i: W8.t) : W256.t =
   let choose = fun n =>
-    let w = if i.[n] then w2 else w1 in
+    let w = if i.[n %% 8] then w2 else w1 in
     w \bits16 n in
   pack16 [choose 0; choose 1; choose 2; choose 3; choose 4; choose 5; choose 6; choose 7;
           choose 8; choose 9; choose 10; choose 11; choose 12; choose 13; choose 14; choose 15].
@@ -442,7 +452,7 @@ abbrev [-printing] VMOVSLDUP_8u32 = VMOVSLDUP_256.
 (* ------------------------------------------------------------------- *)
 op round_scalew(x: int): W16.t =
   let p = ((W32.of_int x) `>>` (W8.of_int 14)) + (W32.of_int 1) in
-  W2u16.truncateu16 (p `>>` (W8.of_int 1)).
+  W2u16.truncateu16 (p `>>` W8.one).
 
 op VPMULHRSW_128 (w1 w2: W128.t): W128.t =
   let v1 = map W16.to_sint (W8u16.to_list w1) in
@@ -459,11 +469,23 @@ abbrev [-printing] VPMULHRS_16u16 = VPMULHRSW_256.
 
 (* ------------------------------------------------------------------- *)
 (* FIXME *)
+op VPMOVZX_16u8_16u16 (w: W128.t) =
+  pack16 (map W2u8.zeroextu16 (W16u8.to_list w)).
+
 op VPMOVZX_8u16_8u32 (w: W128.t) =
   pack8 (map W2u16.zeroextu32 (W8u16.to_list w)).
 
+op VPMOVZX_4u32_4u64 (w: W128.t) =
+  pack4 (map W2u32.zeroextu64 (W4u32.to_list w)).
+
+op VPMOVSX_16u8_16u16 (w: W128.t) =
+  pack16 (map W2u8.sigextu16 (W16u8.to_list w)).
+
 op VPMOVSX_8u16_8u32 (w: W128.t) =
   pack8 (map W2u16.sigextu32 (W8u16.to_list w)).
+
+op VPMOVSX_4u32_4u64 (w: W128.t) =
+  pack4 (map W2u32.sigextu64 (W4u32.to_list w)).
 
 (* ------------------------------------------------------------------- *)
 (* AES instruction *)
