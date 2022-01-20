@@ -199,6 +199,9 @@ Definition pp_sz (s: string) (sz: wsize) (_: unit) : string :=
 Definition pp_ve_sz (s: string) (ve: velem) (sz: wsize) (_: unit) : string := 
   s ++ "_" ++ string_of_ve_sz ve sz.
 
+Definition pp_ve_sz_ve_sz (s: string) (ve: velem) (sz: wsize) (ve': velem) (sz': wsize) (_: unit): string :=
+  s ++ "_" ++ string_of_ve_sz ve sz ++ "_" ++ string_of_ve_sz ve' sz'.
+
 Definition pp_sz_sz (s: string) (sign:bool) (sz sz': wsize) (_: unit) : string := 
   s ++ "_u" ++ string_of_wsize sz ++ (if sign then "_s" else "_u")%string ++ string_of_wsize sz'.
 

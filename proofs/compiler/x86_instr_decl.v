@@ -1351,19 +1351,17 @@ Definition Ox86_VMOVDQU_instr :=
   mk_instr_w_w "VMOVDQU" x86_VMOVDQU [:: E 1] [:: E 0] 2 check_vmovdqu (PrimP U128 VMOVDQU) (pp_name "vmovdqu").
 
 Definition Ox86_VPMOVSX_instr :=
-  let name := "VPMOVSX"%string in
   (λ ve sz ve' sz',
-   mk_instr (λ _, name) [:: sword sz ] [:: sword sz' ] [:: E 1 ] [:: E 0 ]
+   mk_instr (pp_ve_sz_ve_sz "VPMOVSX" ve sz ve' sz') [:: sword sz ] [:: sword sz' ] [:: E 1 ] [:: E 0 ]
             MSB_CLEAR (@x86_VPMOVSX ve sz ve' sz') [:: [:: xmm ; xmmm true]] 2 sz [::] (pp_vpmovx "vpmovsx" ve sz ve' sz'),
-   (name, PrimVV VPMOVSX)
+   ("VPMOVSX"%string, PrimVV VPMOVSX)
    ).
 
 Definition Ox86_VPMOVZX_instr :=
-  let name := "VPMOVZX"%string in
   (λ ve sz ve' sz',
-   mk_instr (λ _, name) [:: sword sz ] [:: sword sz' ] [:: E 1 ] [:: E 0 ]
+   mk_instr (pp_ve_sz_ve_sz "VPMOVZX" ve sz ve' sz') [:: sword sz ] [:: sword sz' ] [:: E 1 ] [:: E 0 ]
             MSB_CLEAR (@x86_VPMOVZX ve sz ve' sz') [:: [:: xmm ; xmmm true]] 2 sz [::] (pp_vpmovx "vpmovzx" ve sz ve' sz'),
-   (name, PrimVV VPMOVZX)
+   ("VPMOVZX"%string, PrimVV VPMOVZX)
    ).
 
 Definition check_xmm_xmm_xmmm (_:wsize) := [:: xmm_xmm_xmmm].
