@@ -310,11 +310,14 @@ op VPMULH_8u16 (w1 w2: W128.t) : W128.t =
 op VPMULH_16u16 (w1 w2: W256.t) : W256.t =
   map2 (fun (x y:W16.t) => wmulhs x y) w1 w2.
 
+op wmulls (x y: W16.t): W16.t =
+  truncateu16 (W32.of_int ((W16.to_sint x) * (W16.to_sint y))).
+
 op VPMULL_8u16 (w1 w2: W128.t) : W128.t =
-  map2 (fun (x y:W16.t) => x * y) w1 w2.
+  map2 (fun (x y:W16.t) => wmulls x y) w1 w2.
 
 op VPMULL_16u16 (w1 w2: W256.t) : W256.t =
-  map2 (fun (x y:W16.t) => x * y) w1 w2.
+  map2 (fun (x y:W16.t) => wmulls x y) w1 w2.
 
 (* ------------------------------------------------------------------- *)
 op VPSLLDQ_128 (w1:W128.t) (w2:W8.t) =
