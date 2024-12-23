@@ -887,18 +887,20 @@ module X86BaseOpU : BaseOp
       i @ [CL.Instr.Op1.mov l a]
 
     | CMOVcc ws -> (* warning, does not work with ! cf *)
-      let a2, i2 = cast_atome ws (List.nth es 1) in
-      let a3, i3 = cast_atome ws (List.nth es 2) in
-      let x1 = I.glval_to_lval (List.nth xs 0) in
-      begin match (List.nth es 0) with
-      | Pvar _ as cc->
-        let cc = I.gexp_to_var cc in
-        i2 @ [CL.Instr.Op2_2.cmov x1 cc a2 a3]
-      | Papp1(Onot, (Pvar _ as cc)) ->
-        let cc = I.gexp_to_var cc in
-        i2 @ [CL.Instr.Op2_2.cmov x1 cc a3 a2]
-      | _ -> assert false
-      end
+        let a2, i2 = cast_atome ws (List.nth es 1) in
+        let a3, i3 = cast_atome ws (List.nth es 2) in
+        let x1 = I.glval_to_lval (List.nth xs 0) in
+        begin match (List.nth es 0) with
+        | Pvar _ as cc->
+          let cc = I.gexp_to_var cc in
+          let lcc = CL.Instr.Llvar cc in
+          i2 @ [CL.Instr.Op2_2.cmov x1 lcc a2 a3]
+        | Papp1(Onot, (Pvar _ as cc)) ->
+          let cc = I.gexp_to_var cc in
+          let lcc = CL.Instr.Llvar cc in
+          i2 @ [CL.Instr.Op2_2.cmov x1 lcc a3 a2]
+        | _ -> assert false
+        end
 
     | ADD ws ->
       begin
