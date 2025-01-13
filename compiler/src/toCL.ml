@@ -1891,7 +1891,7 @@ module Mk(O:BaseOp) = struct
       begin
         match a with
         | Lvar x -> [a], [], O.assgn_to_instr trans a e
-        | Lnone _ | Lmem _ | Laset _ |Lasub _ -> assert false
+        | Lnone _ | Lmem _ | Laset _ | Lasub _ -> assert false
       end
     | Copn(xs, _, o, es) -> xs, [], pp_sopn i.i_loc.base_loc xs o es trans
 

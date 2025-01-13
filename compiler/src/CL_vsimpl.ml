@@ -555,10 +555,13 @@ module SimplVector = struct
         if not(List.exists (is_eq_tyvar tv) ret_vars) && unused_lval tv nI then
           node.nkind <- { iname = "nop"; iargs = [] }
         else ()
-      | {iname = "mov"; iargs = [Lval (Llvar tv); _]}  ->
+      | {iname = "cast"; iargs = [Lval (Lvatome l); _]} ->
+        ()
+      | {iname = "mov"; iargs = [Lval (Llvar tv); _]} ->
         if not(List.exists (is_eq_tyvar tv) ret_vars) && unused_lval tv nI then
           node.nkind <- { iname = "nop"; iargs = [] }
-        else ()
+      | {iname = "mov"; iargs = [Lval (Lvatome l); _]} ->
+        ()
       | _ -> ()
 
   let rec nop_uinsts cfg ret_vars node =
