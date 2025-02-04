@@ -105,11 +105,11 @@ let parse_and_print print arch call_conv ecoutput joutput output file funname =
      let pre_rpred' = CL_vsimpl.GhostVector.unfold_vghosts_rpred formals' pre_rpred in
      let post_epred' = CL_vsimpl.GhostVector.unfold_vghosts_epred formals' post_epred in
      let post_rpred' = CL_vsimpl.GhostVector.unfold_vghosts_rpred formals' post_rpred in
-     let ret_vars = CL_vsimpl.SimplVector.get_ret_vars post_epred' post_rpred' in
+     let ret_vars = CL_vsimpl.SimplVector.get_clause_vars post_epred' post_rpred' in
+     let prog' = CL_vsimpl.GhostVector.unfold_cfg_clauses prog' formals' in
      let cfg = CL_vsimpl.Cfg.cfg_of_prog_rev prog' in
      let clean_cfg = CL_vsimpl.SimplVector.simpl_cfg cfg ret_vars in
      let prog' = CL_vsimpl.Cfg.prog_of_cfg clean_cfg in
-     let prog' = CL_vsimpl.GhostVector.unfold_cfg_clauses prog' formals' in
      let pre' = (pre_epred', pre_rpred') in
      let post' = (post_epred', post_rpred') in
      let proc = {proc with formals = formals'; pre = pre'; prog = prog'; post = post'} in

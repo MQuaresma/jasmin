@@ -225,28 +225,6 @@ module GhostVector = struct
   let unfold_vghosts_epred ghosts pre =
      List.map (unfold_ghosts_epred ghosts) pre
 
-  let unfold_clauses node formals =
-    match node with
-    | {iname = "assert"; iargs = [Pred (ep, rp)]} ->
-      let ep' = unfold_vghosts_epred formals ep in
-      let rp' = unfold_vghosts_rpred formals rp in
-      {iname = "assert"; iargs = [Pred (ep',rp')]}
-    | {iname = "assume"; iargs = [Pred (ep, rp)]} ->
-      let ep' = unfold_vghosts_epred formals ep in
-      let rp' = unfold_vghosts_rpred formals rp in
-      {iname = "assume"; iargs = [Pred (ep',rp')]}
-    | {iname = "cut"; iargs = [Pred (ep, rp)]} ->
-      let ep' = unfold_vghosts_epred formals ep in
-      let rp' = unfold_vghosts_rpred formals rp in
-      {iname = "cut"; iargs = [Pred (ep',rp')]}
-    | _ -> node
-
-  let rec unfold_cfg_clauses cfg formals =
-    match cfg with
-    | h::t ->
-      [unfold_clauses h formals] @ (unfold_cfg_clauses t formals)
-    | [] -> []
-
   let unfold_vectors formals ret_vars =
     let aux ((v,ty) as tv) =
       let mk_vector = Annot.filter_string_list None ["u16x16", U16x16] in
@@ -283,6 +261,28 @@ module GhostVector = struct
         let fs,ispre,ispost = aux tv in
         fs @ acc1, ispre @ acc2, ispost @ acc3)
       ([],[],[]) formals
+
+    let unfold_clauses node formals =
+      match node with
+      | {iname = "assert"; iargs = [Pred (ep, rp)]} ->
+        let ep' = unfold_vghosts_epred formals ep in
+        let rp' = unfold_vghosts_rpred formals rp in
+        {iname = "assert"; iargs = [Pred (ep',rp')]}
+      | {iname = "assume"; iargs = [Pred (ep, rp)]} ->
+        let ep' = unfold_vghosts_epred formals ep in
+        let rp' = unfold_vghosts_rpred formals rp in
+        {iname = "assume"; iargs = [Pred (ep',rp')]}
+      | {iname = "cut"; iargs = [Pred (ep, rp)]} ->
+        let ep' = unfold_vghosts_epred formals ep in
+        let rp' = unfold_vghosts_rpred formals rp in
+        {iname = "cut"; iargs = [Pred (ep',rp')]}
+      | _ -> node
+
+    let rec unfold_cfg_clauses cfg formals =
+      match cfg with
+      | h::t ->
+        [unfold_clauses h formals] @ (unfold_cfg_clauses t formals)
+      | [] -> []
 end
 
 module SimplVector = struct
@@ -327,6 +327,64 @@ module SimplVector = struct
     | Vector (i, ty''), Vector (i', ty''') ->
       (i * int_of_ty ty'' == i' * int_of_ty ty''') && ((is_unsigned ty'') == (is_unsigned ty'''))
     | _ -> is_equiv_type ty' ty (* use recursivity to check the commutative pair *)
+
+  let rec get_evars epred =
+    let rec aux e =
+      begin
+      match e with
+      | Iconst _ -> []
+      | Ivar v -> [v]
+      | Iunop (_, e') -> aux e'
+      | Ibinop (e1, _, e2) ->
+          (aux e1) @ (aux e2)
+      | Ilimbs (_, el) -> List.flatten (List.map aux el)
+      | IUnPack _ -> assert false
+      end
+    in
+    match epred with
+    | Eeq (e1, e2) ->
+      let vl1 = aux e1 in
+      let vl2 = aux e2 in
+      vl1 @ vl2
+    | Eeqmod (e1, e2, eps) ->
+      let vl1 = aux e1 in
+      let vl2 = aux e2 in
+      let vl3 = List.flatten (List.map aux eps) in
+      vl1 @ vl2 @ vl3
+
+  let rec get_rvars rpred =
+    let rec aux e =
+      begin
+      match e with
+      | Rvar v -> [v]
+      | Rconst _ -> []
+      | Ruext (e', _) ->  aux e'
+      | Rsext (e', _) -> aux e'
+      | Runop (_, e') -> aux e'
+      | Rbinop (e1, _, e2) -> (aux e1) @ (aux e2)
+      | RVget (v, _) -> [v]
+      | UnPack _ -> assert false
+      | Rlimbs (_, el) -> List.flatten (List.map aux el)
+      end
+    in
+    match rpred with
+    | RPcmp (e1, _, e2) ->
+      let vl1 = aux e1 in
+      let vl2 = aux e2 in
+      vl1 @ vl2
+    | RPnot e -> get_rvars e
+    | RPand rps -> List.flatten (List.map get_rvars rps)
+    | RPor rps -> List.flatten (List.map get_rvars rps)
+    | RPeqsmod (e1, e2, e3) ->
+      let vl1 = aux e1 in
+      let vl2 = aux e2 in
+      let vl3 = aux e3 in
+      vl1 @ vl2 @ vl3
+
+  let get_clause_vars epreds rpreds =
+    let epred_rvars = List.flatten (List.map get_evars epreds) in
+    let rpred_vars = List.flatten (List.map get_rvars rpreds) in
+    epred_rvars @ rpred_vars (* FIXME: remove dups *)
 
   let rec find_vect_lval tv n  =
       let (v, ty) = tv in
@@ -500,57 +558,28 @@ module SimplVector = struct
         sr_lvals h
 
   let rec unused_lval ((v, ty) as tv) nI = (* Checks if lval is used in any subsequent instruction *)
-    let rec var_in_vatome tv' l =
-      match l with
-        | h :: t ->
-          begin
-            match h with
-            | Avar (tv'') -> (is_eq_tyvar tv' tv'') || (var_in_vatome tv' t)
-            | Avecta (tv'' , _) -> not(is_eq_tyvar tv' tv'') || (var_in_vatome tv' t)
-            | Avatome l' -> (var_in_vatome tv' t) || (var_in_vatome tv' l')  (* is this valid CL? should we assert false ?? *)
-            | _ -> (var_in_vatome tv' t)
-          end
-        | [] -> false
-    in
-    let aux v' n' =
-      let i = getNextI n' in
-      unused_lval v' i
+    let rec in_args al =
+      let rec is_atom a =
+        match a with
+        | Aconst _ -> false
+        | Avar tv' -> is_eq_tyvar tv tv'
+        | Avecta (tv', _) -> is_eq_tyvar tv tv'
+        | Avatome l -> (List.fold_left (||) false (List.map is_atom l))
+      in
+      match al with
+      | (Atom a) :: t -> is_atom a || in_args t
+      | (Pred (el, rl)) :: t ->
+        let cl_vars = get_clause_vars el rl in
+        List.exists (is_eq_tyvar tv) cl_vars || in_args t
+      | _ :: t -> in_args t
+      | _ -> false
     in
     match nI with
     | None -> true
-    | Some n ->
-      begin
-        match n.nkind with
-        | {iname = "mov"; iargs = [_; Atom (Avar tv')]} -> not(is_eq_tyvar tv tv') && (aux tv n)
-        | {iname = "mov"; iargs = [_; Atom (Avecta (tv', _))]} -> not(is_eq_tyvar tv tv') && (aux tv n)
-        | {iname = "mov"; iargs = [_; Atom (Aconst _)]} -> aux tv n
-        | {iname = "mov"; iargs = [_; Atom (Avatome l)]} -> not(var_in_vatome tv l) && (aux tv n)
-        | {iname = "cast"; iargs = [_; Atom (Avar tv')]} -> not(is_eq_tyvar tv tv') && (aux tv n)
-        | {iname = "cast"; iargs = [_; Atom (Avecta (tv', _))]} -> not(is_eq_tyvar tv tv') && (aux tv n)
-        | {iname = "cast"; iargs = [_; Atom (Aconst _)]} -> aux tv n
-        | {iname = "cast"; iargs = [_; Atom (Avatome l)]} -> not(var_in_vatome tv l) && (aux tv n)
-        | {iname = "adds"; iargs = [_; _; Atom (Avar tv'); Atom (Avar tv'')]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "adds"; iargs = [_; _; Atom (Avecta (tv', _)); Atom (Avecta (tv'', _))]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "add"; iargs = [_; Atom (Avar tv'); Atom (Avar tv'')]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "add"; iargs = [_; Atom (Avecta (tv', _)); Atom (Avecta (tv'', _))]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "subb"; iargs = [_; _; Atom (Avar tv'); Atom (Avar tv'')]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "subb"; iargs = [_; _; Atom (Avecta (tv', _)); Atom (Avecta (tv'', _))]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "sub"; iargs = [_; Atom (Avar tv'); Atom (Avar tv'')]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "sub"; iargs = [_; Atom (Avecta (tv', _)); Atom (Avecta (tv'', _))]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "mull"; iargs = [_; _; Atom (Avar tv'); Atom (Avar tv'')]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "mull"; iargs = [_; _; Atom (Avecta (tv', _)); Atom (Avecta (tv'', _))]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "mul"; iargs = [_; Atom (Avar tv'); Atom (Avar tv'')]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "smul"; iargs = [_; Atom (Avar tv'); Atom (Avar tv'')]} -> not(is_eq_tyvar tv tv') && not(is_eq_tyvar tv tv'') && (aux tv n)
-        | {iname = "ssplit"; iargs = [_; _; Atom (Avar tv'); _]} -> not(is_eq_tyvar tv tv') && (aux tv n)
-        | {iname = "split"; iargs = [_; _; Atom (Avar tv'); _]} -> not(is_eq_tyvar tv tv') && (aux tv n)
-        | {iname = "sar"; iargs = [_; Atom (Avar tv')]} -> not(is_eq_tyvar tv tv') && (aux tv n)
-        | {iname = "sars"; iargs = [_; _; Atom (Avar tv'); _]} -> not(is_eq_tyvar tv tv') && (aux tv n)
-        | _ -> aux tv n
-      end
+    | Some n -> not (in_args n.nkind.iargs) && (unused_lval tv (getNextI n))
 
   let rec nop_uinst cfg ret_vars node =
     let nI = getNextI node in
-    (* TODO: search for unused lval in Lvatome *)
     match node.nkind with
       | {iname = "cast"; iargs = [Lval (Llvar tv); _]}  ->
         if not(List.exists (is_eq_tyvar tv) ret_vars) && unused_lval tv nI then
@@ -575,67 +604,9 @@ module SimplVector = struct
     | h::t ->
       begin
       match h with
-      | { iname = "nop" } -> remove_nops t
+      | { iname = "nop"; iargs = [] } -> remove_nops t
       | _ -> h :: remove_nops t
       end
-
-  let rec get_evars epred =
-    let rec aux e =
-      begin
-      match e with
-      | Iconst _ -> []
-      | Ivar v -> [v]
-      | Iunop (_, e') -> aux e'
-      | Ibinop (e1, _, e2) ->
-          (aux e1) @ (aux e2)
-      | Ilimbs (_, el) -> List.flatten (List.map aux el)
-      | IUnPack _ -> assert false
-      end
-    in
-    match epred with
-    | Eeq (e1, e2) ->
-      let vl1 = aux e1 in
-      let vl2 = aux e2 in
-      vl1 @ vl2
-    | Eeqmod (e1, e2, eps) ->
-      let vl1 = aux e1 in
-      let vl2 = aux e2 in
-      let vl3 = List.flatten (List.map aux eps) in
-      vl1 @ vl2 @ vl3
-
-    let rec get_rvars rpred =
-      let rec aux e =
-        begin
-        match e with
-        | Rvar v -> [v]
-        | Rconst _ -> []
-        | Ruext (e', _) ->  aux e'
-        | Rsext (e', _) -> aux e'
-        | Runop (_, e') -> aux e'
-        | Rbinop (e1, _, e2) -> (aux e1) @ (aux e2)
-        | RVget (v, _) -> [v]
-        | UnPack _ -> assert false
-        | Rlimbs (_, el) -> List.flatten (List.map aux el)
-        end
-      in
-      match rpred with
-      | RPcmp (e1, _, e2) ->
-        let vl1 = aux e1 in
-        let vl2 = aux e2 in
-        vl1 @ vl2
-      | RPnot e -> get_rvars e
-      | RPand rps -> List.flatten (List.map get_rvars rps)
-      | RPor rps -> List.flatten (List.map get_rvars rps)
-      | RPeqsmod (e1, e2, e3) ->
-        let vl1 = aux e1 in
-        let vl2 = aux e2 in
-        let vl3 = aux e3 in
-        vl1 @ vl2 @ vl3
-
-  let get_ret_vars epreds rpreds =
-    let epred_rvars = List.flatten (List.map get_evars epreds) in
-    let rpred_vars = List.flatten (List.map get_rvars rpreds) in
-    epred_rvars @ rpred_vars (* FIXME: remove dups *)
 
   let simpl_cfg cfg ret_vars =
     sr_lvals cfg;
