@@ -33,6 +33,15 @@ let rec is_unsigned (ty: CL.ty) =
   | Bit -> true
   | Vector (_, ty') -> is_unsigned ty'
 
+let lt_to_tl l = List.fold_right (fun (x, y) (l1, l2) -> (x :: l1, y @ l2)) l ([], [])
+
+let rec remove_dups l =
+  match l with
+  | [] -> []
+| h :: t ->
+  if List.mem h t then remove_dups t
+  else h :: (remove_dups t)
+
 module Cfg = struct
 
   type node =
@@ -139,91 +148,120 @@ module GhostVector = struct
     let aux (v, ty) i =
       let name = get_unfolded_vector_namei v i in
       let v' = get_vghost ghosts name in
-      Rvar v'
+      (Rvar v', [(v,ty)])
     in
     match r with
-    | Rvar x -> r
-    | Rconst (c1, c2) -> r
+    | Rvar x -> (r, [])
+    | Rconst (c1, c2) -> (r, [])
     | Ruext (e, c) ->
-      let e' = replace_vghosts_rexp ghosts e in
-      Ruext (e', c)
+      let e',l = replace_vghosts_rexp ghosts e in
+      (Ruext (e', c), l)
     | Rsext (e, c) ->
-      let e' = replace_vghosts_rexp ghosts e in
-      Rsext(e', c)
+      let e',l = replace_vghosts_rexp ghosts e in
+      (Rsext(e', c), l)
     | Runop(s, e) ->
-      let e' = replace_vghosts_rexp ghosts e in
-      Runop(s, e')
+      let e',l = replace_vghosts_rexp ghosts e in
+      (Runop(s, e'), l)
     | Rbinop(e1, s, e2) ->
-      let e1' = replace_vghosts_rexp ghosts e1 in
-      let e2' = replace_vghosts_rexp ghosts e2 in
-      Rbinop(e1', s, e2')
-    | RVget(e,c) -> r
+      let e1',l1 = replace_vghosts_rexp ghosts e1 in
+      let e2',l2 = replace_vghosts_rexp ghosts e2 in
+      let l = l1 @ l2 in
+      (Rbinop(e1', s, e2'), l)
+    | RVget(e,c) -> (r, [])
     | UnPack (e,us,i) ->
       aux e i
-    | Rlimbs (c, e) -> 
-      let e' = List.map (replace_vghosts_rexp ghosts) e in
-      Rlimbs (c, e')
+    | Rlimbs (c, e) ->
+      let e',l = List.fold_right (fun (x,y) (l1,l2) -> (x::l1, y @ l2)) (List.map (replace_vghosts_rexp ghosts) e) ([], []) in
+      (Rlimbs (c, e'), l)
 
   let rec unfold_ghosts_rpred ghosts pre =
     match pre with
     | RPcmp(e1, s, e2) ->
-      let e1' = replace_vghosts_rexp ghosts e1 in
-      let e2' = replace_vghosts_rexp ghosts e2 in
-      RPcmp(e1', s, e2')
+      let e1', l1 = replace_vghosts_rexp ghosts e1 in
+      let e2', l2 = replace_vghosts_rexp ghosts e2 in
+      let l = l1 @ l2 in
+      RPcmp(e1', s, e2'), l
     | RPnot e ->
-      let e' = unfold_ghosts_rpred ghosts e in
-      RPnot e'
+      let e', l = unfold_ghosts_rpred ghosts e in
+      RPnot e', l
     | RPand rps ->
-      let rps' = List.map (unfold_ghosts_rpred ghosts) rps in
-      RPand rps'
+      let rps', l = lt_to_tl (List.map (unfold_ghosts_rpred ghosts) rps) in
+      RPand rps', l
     | RPor  rps ->
-      let rps' = List.map (unfold_ghosts_rpred ghosts) rps in
-      RPor rps'
+      let rps', l = lt_to_tl (List.map (unfold_ghosts_rpred ghosts) rps) in
+      RPor rps', l
     | RPeqsmod (e1,e2,e3) ->
-      let e1' = replace_vghosts_rexp ghosts e1 in
-      let e2' = replace_vghosts_rexp ghosts e2 in
-      let e3' = replace_vghosts_rexp ghosts e3 in
-      RPeqsmod(e1',e2',e3')
+      let e1', l1 = replace_vghosts_rexp ghosts e1 in
+      let e2', l2 = replace_vghosts_rexp ghosts e2 in
+      let e3', l3 = replace_vghosts_rexp ghosts e3 in
+      let l = l1 @ l2 @ l3 in
+      RPeqsmod(e1',e2',e3'), l
 
   let unfold_vghosts_rpred ghosts pre =
-    List.map (unfold_ghosts_rpred ghosts) pre
+    lt_to_tl (List.map (unfold_ghosts_rpred ghosts) pre)
 
   let rec replace_vghosts_eexp ghosts e =
     let aux (v, ty) i =
       let name = get_unfolded_vector_namei v i in
       let v' = get_vghost ghosts name in
-      Ivar v'
+      (Ivar v', [(v, ty)])
     in
     match e with
-    | Iconst c -> e
-    | Ivar v -> e
+    | Iconst c -> e, []
+    | Ivar v -> e, []
     | Iunop (s, e) ->
-      let e' = replace_vghosts_eexp ghosts e in
-      Iunop (s, e')
+      let e', l = replace_vghosts_eexp ghosts e in
+      Iunop (s, e'), l
     | Ibinop (e1, s, e2) ->
-      let e1' = replace_vghosts_eexp ghosts e1 in
-      let e2' = replace_vghosts_eexp ghosts e2 in
-      Ibinop (e1', s, e2')
+      let e1', l1 = replace_vghosts_eexp ghosts e1 in
+      let e2', l2 = replace_vghosts_eexp ghosts e2 in
+      let l = l1 @ l2 in
+      Ibinop (e1', s, e2'), l
     | Ilimbs (c, l) ->
-      let l' = List.map (replace_vghosts_eexp ghosts) l in
-      Ilimbs (c, l')
+      let l', ll = lt_to_tl (List.map (replace_vghosts_eexp ghosts) l) in
+      Ilimbs (c, l'), ll
     | IUnPack (e, us, i) ->
       aux e i
 
   let rec unfold_ghosts_epred ghosts pre =
     match pre with
     | Eeq(e1, e2) ->
-      let e1' = replace_vghosts_eexp ghosts e1 in
-      let e2' = replace_vghosts_eexp ghosts e2 in
-      Eeq(e1', e2')
+      let e1', l1 = replace_vghosts_eexp ghosts e1 in
+      let e2', l2 = replace_vghosts_eexp ghosts e2 in
+      let l = l1 @ l2 in
+      Eeq(e1', e2'), l
     | Eeqmod(e1, e2, es) ->
-      let e1' = replace_vghosts_eexp ghosts e1 in
-      let e2' = replace_vghosts_eexp ghosts e2 in
-      let es' = List.map (replace_vghosts_eexp ghosts) es in
-      Eeqmod(e1', e2', es')
+      let e1', l1 = replace_vghosts_eexp ghosts e1 in
+      let e2', l2 = replace_vghosts_eexp ghosts e2 in
+      let es', l3 = lt_to_tl (List.map (replace_vghosts_eexp ghosts) es) in
+      let l = l1 @ l2 @ l3 in
+      Eeqmod(e1', e2', es'), l
 
   let unfold_vghosts_epred ghosts pre =
-     List.map (unfold_ghosts_epred ghosts) pre
+     lt_to_tl (List.map (unfold_ghosts_epred ghosts) pre )
+
+  let move_to_vghost vl tv =
+    let (v, ty) = tv in
+    let s = not (is_unsigned ty) in
+    let (l_16x16, lty_16x16) as l16x16 = I.var_to_tyvar ~sign:s ~vector:(16,16) v in
+    let ll16x16 = Llvar l16x16 in
+    let vl16x16 = Avar l16x16 in
+    let lvl = Lvatome (List.map (fun tv' -> Llvar tv') vl) in
+    let a_1x256 = Avatome [Avar tv] in
+    [cast lty_16x16 ll16x16 a_1x256; Op1.mov lvl vl16x16]
+
+  let move_from_vghost vl tv =
+    let (v, ty) = tv in
+    let s = not (is_unsigned ty) in
+    let (l_16x16, lty_16x16) as l16x16 = I.var_to_tyvar ~sign:s ~vector:(16,16) v in
+    let ll16x16 = Llvar l16x16 in
+    let vl16x16 = Avar l16x16 in
+    let va_16x16 = List.map (fun tv' -> Avar tv') vl in
+    let a_16x16 = Avatome va_16x16 in
+    let (l_1x256, lty_1x256) as l1x256 = I.var_to_tyvar ~sign:s ~vector:(1,256) v in
+    let l1x256v = Llvar l1x256 in
+    let l_0 = Avecta (l1x256, 0) in
+    [Op1.mov ll16x16 a_16x16; cast lty_1x256 l1x256v vl16x16; Op1.mov (Llvar tv) l_0]
 
   let unfold_vectors formals ret_vars =
     let aux ((v,ty) as tv) =
@@ -242,46 +280,57 @@ module GhostVector = struct
         in
         let s = not(is_unsigned ty) in
         let vl = unfold_vector 16 [] s in
-        let (l_16x16, lty_16x16) as l16x16 = I.var_to_tyvar ~sign:s ~vector:(16,16) v in
-        let ll16x16 = Llvar l16x16 in
-        let vl16x16 = Avar l16x16 in
         if List.exists (is_eq_tyvar tv) ret_vars then
-          let lvl = Lvatome (List.map (fun tv' -> Llvar tv') vl) in
-          let a_1x256 = Avatome [Avar tv] in
-          vl,[], [cast lty_16x16 ll16x16 a_1x256; Op1.mov lvl vl16x16]
+          let il = move_to_vghost vl tv in
+          vl,[], il
         else
-          let va_16x16 = List.map (fun tv' -> Avar tv') vl in
-          let a_16x16 = Avatome va_16x16 in
-          let (l_1x256, lty_1x256) as l1x256 = I.var_to_tyvar ~sign:s ~vector:(1,256) v in
-          let l1x256v = Llvar l1x256 in
-          let l_0 = Avecta (l1x256, 0) in
-          vl,[Op1.mov ll16x16 a_16x16; cast lty_1x256 l1x256v vl16x16; Op1.mov (Llvar tv) l_0],[]
+          let il = move_from_vghost vl tv in
+          vl,il,[]
     in
     List.fold_left (fun (acc1,acc2,acc3) tv ->
         let fs,ispre,ispost = aux tv in
         fs @ acc1, ispre @ acc2, ispost @ acc3)
       ([],[],[]) formals
 
+    let inject_vector_ghosts formals vghost =
+      let (v, ty) = vghost in
+      let rec build_tyvar_list i acc =
+        match i with
+        | 0 -> acc
+        | n ->
+          let name = get_unfolded_vector_namei v (i-1) in
+          let v' = get_vghost formals name in
+          build_tyvar_list (n - 1) (v' :: acc)
+        in
+      let vl = build_tyvar_list 16 [] in
+      move_to_vghost vl vghost
+
     let unfold_clauses node formals =
       match node with
       | {iname = "assert"; iargs = [Pred (ep, rp)]} ->
-        let ep' = unfold_vghosts_epred formals ep in
-        let rp' = unfold_vghosts_rpred formals rp in
-        {iname = "assert"; iargs = [Pred (ep',rp')]}
+        let ep', l1 = unfold_vghosts_epred formals ep in
+        let rp', l2 = unfold_vghosts_rpred formals rp in
+        let l = remove_dups (l1 @ l2) in
+        let prel = List.fold_right (fun x l -> (inject_vector_ghosts formals x) @ l) l [] in
+        prel @ [{iname = "assert"; iargs = [Pred (ep',rp')]}]
       | {iname = "assume"; iargs = [Pred (ep, rp)]} ->
-        let ep' = unfold_vghosts_epred formals ep in
-        let rp' = unfold_vghosts_rpred formals rp in
-        {iname = "assume"; iargs = [Pred (ep',rp')]}
+        let ep', l1 = unfold_vghosts_epred formals ep in
+        let rp', l2 = unfold_vghosts_rpred formals rp in
+        let l = remove_dups (l1 @ l2) in
+        let prel = List.fold_right (fun x l -> (inject_vector_ghosts formals x) @ l) l [] in
+        (* prel @ *) [{iname = "assume"; iargs = [Pred (ep',rp')]}]
       | {iname = "cut"; iargs = [Pred (ep, rp)]} ->
-        let ep' = unfold_vghosts_epred formals ep in
-        let rp' = unfold_vghosts_rpred formals rp in
-        {iname = "cut"; iargs = [Pred (ep',rp')]}
-      | _ -> node
+        let ep', l1 = unfold_vghosts_epred formals ep in
+        let rp', l2 = unfold_vghosts_rpred formals rp in
+        let l = remove_dups (l1 @ l2) in
+        let prel = List.fold_right (fun x l -> (inject_vector_ghosts formals x) @ l) l [] in
+        prel @ [{iname = "cut"; iargs = [Pred (ep',rp')]}]
+      | _ -> [node]
 
     let rec unfold_cfg_clauses cfg formals =
       match cfg with
       | h::t ->
-        [unfold_clauses h formals] @ (unfold_cfg_clauses t formals)
+        (unfold_clauses h formals) @ (unfold_cfg_clauses t formals)
       | [] -> []
 end
 
@@ -338,7 +387,7 @@ module SimplVector = struct
       | Ibinop (e1, _, e2) ->
           (aux e1) @ (aux e2)
       | Ilimbs (_, el) -> List.flatten (List.map aux el)
-      | IUnPack _ -> assert false
+      | IUnPack (v,_,_) -> [v]
       end
     in
     match epred with
@@ -363,7 +412,7 @@ module SimplVector = struct
       | Runop (_, e') -> aux e'
       | Rbinop (e1, _, e2) -> (aux e1) @ (aux e2)
       | RVget (v, _) -> [v]
-      | UnPack _ -> assert false
+      | UnPack (v,_,_) -> [v]
       | Rlimbs (_, el) -> List.flatten (List.map aux el)
       end
     in
@@ -384,7 +433,7 @@ module SimplVector = struct
   let get_clause_vars epreds rpreds =
     let epred_rvars = List.flatten (List.map get_evars epreds) in
     let rpred_vars = List.flatten (List.map get_rvars rpreds) in
-    epred_rvars @ rpred_vars (* FIXME: remove dups *)
+    remove_dups (epred_rvars @ rpred_vars)
 
   let rec find_vect_lval tv n  =
       let (v, ty) = tv in
@@ -439,6 +488,16 @@ module SimplVector = struct
         Some (v', ty')
       else
         aux (v, ty) n
+    | {iname = "subb"; iargs = [_; Lval (Llvar (v',ty')); Atom (Avar (_, ty'')); Atom (Avar (_, ty'''))]} ->
+      if v == v' && (is_equiv_type ty' ty'' || is_equiv_type ty' ty''') then
+        Some (v', ty')
+      else
+        aux (v, ty) n
+    | {iname = "sub"; iargs = [Lval (Llvar (v',ty'));  Atom (Avar (_, ty'')); Atom (Avar (_, ty'''))]} ->
+        if v == v' && (is_equiv_type ty' ty'' || is_equiv_type ty' ty''') then
+          Some (v', ty')
+        else
+          aux (v, ty) n
     | {iname = "mull"; iargs = [Lval (Llvar (vh', tyh')); Lval (Llvar (vl', tyl')); Atom (Avar (_, ty'')); Atom (Avar (_, ty'''))]} ->
       if v == vl' &&  (is_equiv_type  tyl' ty'' || is_equiv_type tyl' ty''') then
         Some (vl', tyl')
@@ -446,6 +505,13 @@ module SimplVector = struct
         Some (vh', tyh')
       else
         aux (v, ty) n
+    | {iname = "smull"; iargs = [Lval (Llvar (vh', tyh')); Lval (Llvar (vl', tyl')); Atom (Avar (_, ty'')); Atom (Avar (_, ty'''))]} ->
+        if v == vl' &&  (is_equiv_type  tyl' ty'' || is_equiv_type tyl' ty''') then
+          Some (vl', tyl')
+        else if v == vh' &&  (is_equiv_type  tyh' ty'' || is_equiv_type tyh' ty''') then
+          Some (vh', tyh')
+        else
+          aux (v, ty) n
     | {iname = "mul"; iargs = [Lval (Llvar (v', ty')); Atom (Avar (_, ty'')); Atom (Avar (_, ty'''))]} ->
       if v == v' &&  (is_equiv_type  ty' ty'' || is_equiv_type ty' ty''') then
         Some (v', ty')
@@ -456,11 +522,6 @@ module SimplVector = struct
         Some (v', ty')
       else
         aux (v, ty) n
-    | {iname = "subb"; iargs = [_; Lval (Llvar (v',ty')); Atom (Avar (_, ty'')); Atom (Avar (_, ty'''))]} ->
-        if v == v' &&  (is_equiv_type  ty' ty'' || is_equiv_type ty' ty''') then
-          Some (v', ty')
-        else
-          aux (v, ty) n
     | {iname = "split"; iargs = [Lval (Llvar (vh', tyh')); Lval (Llvar (vl', tyl')); Atom (Avar (_, ty'')); _]} ->
       if v == vl' && is_equiv_type tyl' ty'' then
         Some (vl', tyl')
@@ -488,6 +549,113 @@ module SimplVector = struct
       else
         aux (v, ty) n
     | _ -> aux (v, ty) n (* Keep searching *)
+
+    let sr_epred_lval pred ep =
+      let rec aux e =
+        match e with
+        | Iconst c -> e
+        | Ivar v ->
+          let l = find_vect_lval v pred in
+          begin
+            match l with
+            | Some v' -> Ivar v'
+            | None -> e
+          end
+        | Iunop (s, e) ->
+          let e' = aux e in
+          Iunop (s, e')
+        | Ibinop (e1, s, e2) ->
+          let e1' = aux e1 in
+          let e2' = aux e2 in
+          Ibinop (e1', s, e2')
+        | Ilimbs (c, l) ->
+          let l' = List.map aux l in
+          Ilimbs (c, l')
+        | IUnPack (v, us, i) ->
+          let l = find_vect_lval v pred in
+          begin
+            match l with
+            | Some v' -> IUnPack (v', us, i)
+            | None -> e
+          end
+      in
+      match ep with
+      | Eeq (e1, e2) ->
+        let e1' = aux e1 in
+        let e2' = aux e2 in
+        Eeq (e1', e2')
+      | Eeqmod (e1, e2, el) ->
+        let e1' = aux e1 in
+        let e2' = aux e2 in
+        let el' = List.map aux el in
+        Eeqmod (e1', e2', el')
+
+    let rec sr_rpred_lval pred rp =
+      let rec aux r =
+        match r with
+        | Rvar v ->
+          let l = find_vect_lval v pred in
+          begin
+            match l with
+            | Some v' -> Rvar v'
+            | None -> r
+          end
+        | Rconst (c1, c2) -> r
+        | Ruext (e, c) ->
+          let e' = aux e in
+          Ruext (e', c)
+        | Rsext (e, c) ->
+          let e' = aux e in
+          Rsext(e', c)
+        | Runop(s, e) ->
+          let e' = aux e in
+          Runop(s, e')
+        | Rbinop(e1, s, e2) ->
+          let e1' = aux e1 in
+          let e2' = aux e2 in
+          Rbinop(e1', s, e2')
+        | RVget(v,c) ->
+          let l = find_vect_lval v pred in
+          begin
+            match l with
+            | Some v' -> RVget (v', c)
+            | None -> r
+          end
+        | UnPack (v,us,i) ->
+          let l = find_vect_lval v pred in
+          begin
+            match l with
+            | Some v' -> UnPack (v', us, i)
+            | None -> r
+          end
+        | Rlimbs (c, e) ->
+          let e' = List.map (aux) e in
+          Rlimbs (c, e')
+      in
+      match rp with
+        | RPcmp(e1, s, e2) ->
+          let e1' = aux e1 in
+          let e2' = aux e2 in
+          RPcmp(e1', s, e2')
+        | RPnot e ->
+          let e' = sr_rpred_lval pred e in
+          RPnot e'
+        | RPand rps ->
+          let rps' = List.map (sr_rpred_lval pred) rps in
+          RPand rps'
+        | RPor  rps ->
+          let rps' = List.map (sr_rpred_lval pred) rps in
+          RPor rps'
+        | RPeqsmod (e1,e2,e3) ->
+          let e1' = aux e1 in
+          let e2' = aux e2 in
+          let e3' = aux e3 in
+          RPeqsmod(e1',e2',e3')
+
+    let sr_clause_lval (el, rl) pred =
+      let el' = List.map (sr_epred_lval pred) el in
+      let rl' = List.map (sr_rpred_lval pred) rl in
+      (el', rl')
 
     let sr_lval node pred = (* Search for the source of the argument in lval of another instruction *)
       let rec update_arg args v i =
@@ -522,6 +690,9 @@ module SimplVector = struct
       | {iname = "mull"; iargs = [_; _; Atom (Avar (v, Vector (i, ty))); Atom (Avar (v', Vector (i', ty')))]} -> 
         aux (v, Vector (i, ty)) 2;
         aux (v', Vector (i', ty')) 3;
+      | {iname = "smull"; iargs = [_; _; Atom (Avar (v, Vector (i, ty))); Atom (Avar (v', Vector (i', ty')))]} -> 
+          aux (v, Vector (i, ty)) 2;
+          aux (v', Vector (i', ty')) 3;
       | {iname = "mul"; iargs = [_; Atom (Avar (v, Vector (i, ty))); Atom (Avar (v', Vector (i', ty')))]} -> 
           aux (v, Vector (i, ty)) 1;
           aux (v', Vector (i', ty')) 2;
@@ -548,6 +719,10 @@ module SimplVector = struct
         aux (v, Vector (i, ty)) 2;
       | {iname = "mov"; iargs = [_; Atom (Avar (v, Vector (i,ty)))]} ->
         aux (v, Vector (i, ty)) 1;
+      | {iname = "assert"; iargs = [Pred cl]} ->
+        node.nkind <- { iname = "assert"; iargs = [Pred (sr_clause_lval cl pred)]}
+      | {iname = "assume"; iargs = [Pred cl]} ->
+        node.nkind <- { iname = "assume"; iargs = [Pred (sr_clause_lval cl pred)]}
       | _ -> ()
 
     let rec sr_lvals node =

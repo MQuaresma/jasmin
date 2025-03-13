@@ -312,6 +312,7 @@ module CL = struct
 
       let subc = op2_2 "subc"
       let mull = op2_2 "mull"
+      let smull = op2_2 "smull"
       let cmov = op2_2  "cmov"
       let adds = op2_2  "adds"
       let subb = op2_2  "subb"
@@ -368,7 +369,6 @@ module CL = struct
 
       let vsars (d1 : lval) (d2 : lval) (s : atom) (c : const list) =
         { iname = "sars"; iargs = [Lval d1; Lval d2; Atom s; Lconst c]}
-
     end
 
     module Shift2s = struct
@@ -552,6 +552,7 @@ module I (S:S): I = struct
     | Papp2(Osub _, e1, e2) -> minu !> e1 !> e2
     | Papp2(Omul _, e1, e2) -> mull !> e1 !> e2
     | PappN(Oabstract {pa_name="se_16_64"}, [v]) -> Rsext (!> v, 48)
+    | PappN(Oabstract {pa_name="se_16_32"}, [v]) -> Rsext (!> v, 16)
     | PappN(Oabstract {pa_name="se_32_64"}, [v]) -> Rsext (!> v, 32)
     | PappN(Oabstract {pa_name="ze_16_64"}, [v]) -> Ruext (!> v, 48)
     | PappN(Oabstract {pa_name="ze_16_32"}, [v]) -> Ruext (!> v, 16)
@@ -1680,14 +1681,28 @@ module X86BaseOpS : BaseOp
       end
 
     | VPMULL (v,ws) ->
-      let a1,i1 = cast_vector_atome ws v (List.nth es 0) in
-      let a2,i2 = cast_vector_atome ws v (List.nth es 1) in
-      let v = int_of_velem v in
-      let s = int_of_ws ws in
-      let l0_tmp = I.mk_tmp_lval ~vector:(s/v,v) (CoreIdent.tu ws) in
-      let l = I.glval_to_lval (List.nth xs 0) in
-      let i3 = cast_atome_vector ws v !l0_tmp l in
-      i1 @ i2 @ [CL.Instr.Op2.smul l0_tmp a1 a2 ] @ i3
+      begin
+        let l = ["smt", `Smt; "default", `Default] in
+        let trans = trans annot l in
+        let a1,i1 = cast_vector_atome ws v (List.nth es 0) in
+        let a2,i2 = cast_vector_atome ws v (List.nth es 1) in
+        let v = int_of_velem v in
+        let s = int_of_ws ws in
+        let l = I.glval_to_lval (List.nth xs 0) in
+        let l_tmp = I.mk_tmp_lval ~vector:(s/v,v) (CoreIdent.tu ws) in
+        let i3 = cast_atome_vector ws v !l_tmp l in
+        match trans with
+        | `Smt ->
+          i1 @ i2 @ [CL.Instr.Op2.smul l_tmp a1 a2 ] @ i3
+        | `Default ->
+          let lh_tmp = I.mk_tmp_lval ~vector:(s/v,v) (CoreIdent.tu ws) in
+          let ll_tmp = I.mk_tmp_lval ~sign:false ~vector:(s/v,v) (CoreIdent.tu ws) in
+          let (_, l_ty) = I.get_lval l_tmp in
+          i1 @ i2 @ [
+            CL.Instr.Op2_2.smull lh_tmp ll_tmp a1 a2;
+            CL.Instr.cast l_ty l_tmp !ll_tmp
+          ] @ i3
+      end
 
     | VPMULH ws ->
       let a1,i1 = cast_vector_atome ws VE16 (List.nth es 0) in
@@ -1698,7 +1713,7 @@ module X86BaseOpS : BaseOp
       let l_tmp1 = I.mk_tmp_lval ~sign:false ~vector:(s/v,v) (CoreIdent.tu ws) in
       let l = I.glval_to_lval (List.nth xs 0) in
       let i3 = cast_atome_vector ws v !l_tmp l in
-      i1 @ i2 @ [CL.Instr.Op2_2.mull l_tmp l_tmp1 a1 a2] @ i3
+      i1 @ i2 @ [CL.Instr.Op2_2.smull l_tmp l_tmp1 a1 a2] @ i3
 
     | VPSRA (ve, ws) ->
       begin
