@@ -264,6 +264,7 @@ module GhostVector = struct
     [Op1.mov ll16x16 a_16x16; cast lty_1x256 l1x256v vl16x16; Op1.mov (Llvar tv) l_0]
 
   let unfold_vectors formals ret_vars =
+    let formals' = remove_dups formals in
     let aux ((v,ty) as tv) =
       let mk_vector = Annot.filter_string_list None ["u16x16", U16x16] in
       match Annot.ensure_uniq1 "vect" mk_vector (v.v_annot) with
@@ -290,7 +291,7 @@ module GhostVector = struct
     List.fold_left (fun (acc1,acc2,acc3) tv ->
         let fs,ispre,ispost = aux tv in
         fs @ acc1, ispre @ acc2, ispost @ acc3)
-      ([],[],[]) formals
+      ([],[],[]) formals'
 
     let inject_vector_ghosts formals vghost =
       let (v, ty) = vghost in
@@ -313,12 +314,10 @@ module GhostVector = struct
         let l = remove_dups (l1 @ l2) in
         let prel = List.fold_right (fun x l -> (inject_vector_ghosts formals x) @ l) l [] in
         prel @ [{iname = "assert"; iargs = [Pred (ep',rp')]}]
-      | {iname = "assume"; iargs = [Pred (ep, rp)]} ->
-        let ep', l1 = unfold_vghosts_epred formals ep in
-        let rp', l2 = unfold_vghosts_rpred formals rp in
-        let l = remove_dups (l1 @ l2) in
-        let prel = List.fold_right (fun x l -> (inject_vector_ghosts formals x) @ l) l [] in
-        (* prel @ *) [{iname = "assume"; iargs = [Pred (ep',rp')]}]
+      | {iname = "assume"; iargs = [Pred (ep, rp)]} -> (* TODO: for now we assume that assumptions are always preceded by assertions *)
+        let ep', _ = unfold_vghosts_epred formals ep in
+        let rp', _ = unfold_vghosts_rpred formals rp in
+        [{iname = "assume"; iargs = [Pred (ep',rp')]}]
       | {iname = "cut"; iargs = [Pred (ep, rp)]} ->
         let ep', l1 = unfold_vghosts_epred formals ep in
         let rp', l2 = unfold_vghosts_rpred formals rp in
@@ -546,6 +545,11 @@ module SimplVector = struct
         Some (vl', tyl')
       else if v == vh' && is_equiv_type tyh' ty'' then
         Some (vh', tyh')
+      else
+        aux (v, ty) n
+    | {iname = "broadcast"; iargs = [Lval (Llvar (v', ty')); _; _]} ->
+      if v == v' then
+        Some (v', ty')
       else
         aux (v, ty) n
     | _ -> aux (v, ty) n (* Keep searching *)

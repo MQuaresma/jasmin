@@ -381,6 +381,12 @@ module CL = struct
 
     end
 
+    module Broadcast = struct (* TODO: consider merging with module Shift *)
+      let broadcast iname (d : lval) (c : const) (s : atom) =
+        { iname; iargs = [Lval d; Const c; Atom s] }
+      let broadcast = broadcast "broadcast"
+    end
+
     let cast _ty (d : lval) (s : atom) =
       { iname = "cast"; iargs = [Lval d; Atom s] }
 
@@ -1633,13 +1639,12 @@ module X86BaseOpS : BaseOp
         let a1,i1 = cast_atome (wsize_of_velem ve) (List.nth es 0) in
         let v = int_of_velem ve in
         let s = int_of_ws ws in
-        let rec repeat acc n x =
-          if n == 0 then acc else repeat (x :: acc) (n - 1) x in
-        let ac = CL.Instr.Avatome (repeat [] (s/v) a1) in
+        let al = CL.Instr.Avatome [a1] in
+        let c = I.mk_const (s/v) in
         let l_tmp = I.mk_tmp_lval ~vector:(s/v,v) (CoreIdent.tu ws) in
         let l = I.glval_to_lval (List.nth xs 0) in
         let i2 = cast_atome_vector ws v !l_tmp l in
-        i1 @ [CL.Instr.Op1.mov l_tmp ac] @ i2
+        i1 @ [CL.Instr.Broadcast.broadcast l_tmp c al] @ i2
       end
 
     | VPADD (ve,ws) ->
