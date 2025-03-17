@@ -1,6 +1,12 @@
 open ToCL
 open CoreIdent
 
+(*
+TODO:
+1: load constants into vector registers: we should unpack instead of loading full value
+2: shuffle functions don't have an effect?
+*)
+
 module Counter = struct
   let cpt = ref 0
   let next () = incr cpt ; !cpt
@@ -315,9 +321,11 @@ module GhostVector = struct
         let prel = List.fold_right (fun x l -> (inject_vector_ghosts formals x) @ l) l [] in
         prel @ [{iname = "assert"; iargs = [Pred (ep',rp')]}]
       | {iname = "assume"; iargs = [Pred (ep, rp)]} -> (* TODO: for now we assume that assumptions are always preceded by assertions *)
-        let ep', _ = unfold_vghosts_epred formals ep in
-        let rp', _ = unfold_vghosts_rpred formals rp in
-        [{iname = "assume"; iargs = [Pred (ep',rp')]}]
+        let ep', l1 = unfold_vghosts_epred formals ep in
+        let rp', l2 = unfold_vghosts_rpred formals rp in
+        let l = remove_dups (l1 @ l2) in
+        let prel = List.fold_right (fun x l -> (inject_vector_ghosts formals x) @ l) l [] in
+        prel @ [{iname = "assume"; iargs = [Pred (ep',rp')]}]
       | {iname = "cut"; iargs = [Pred (ep, rp)]} ->
         let ep', l1 = unfold_vghosts_epred formals ep in
         let rp', l2 = unfold_vghosts_rpred formals rp in
@@ -459,6 +467,11 @@ module SimplVector = struct
         aux (v'', ty'') n
       else if v == v' && ((int_of_ty ty'') * ll) == (int_of_ty ty') then (* Since we're not able to reconstruct the list, this is no longer invertible *)
         Some (v', ty')
+      else
+        aux (v, ty) n
+    | {iname = "mov"; iargs = [Lval (Llvar (v', ty')); Atom (Aconst _)]} ->
+      if v == v' then
+        None
       else
         aux (v, ty) n
     | {iname = "cast"; iargs = [Lval (Llvar (v',ty')); Atom (Avar (v'', ty''))]} ->
@@ -736,8 +749,8 @@ module SimplVector = struct
         sr_lval node h;
         sr_lvals h
 
-  let rec unused_lval ((v, ty) as tv) nI = (* Checks if lval is used in any subsequent instruction *)
-    let rec in_args al =
+  let rec unused_lval ((v, ty) as tv) node = (* Checks if lval is used in any subsequent instruction *)
+    let rec aux larg nI =
       let rec is_atom a =
         match a with
         | Aconst _ -> false
@@ -745,17 +758,18 @@ module SimplVector = struct
         | Avecta (tv', _) -> is_eq_tyvar tv tv'
         | Avatome l -> (List.fold_left (||) false (List.map is_atom l))
       in
-      match al with
-      | (Atom a) :: t -> is_atom a || in_args t
+      match larg with
+      | [] -> unused_lval tv nI
+      | (Atom a) :: t -> not(is_atom a) && (aux t nI)
       | (Pred (el, rl)) :: t ->
         let cl_vars = get_clause_vars el rl in
-        List.exists (is_eq_tyvar tv) cl_vars || in_args t
-      | _ :: t -> in_args t
-      | _ -> false
-    in
-    match nI with
+        not(List.exists (is_eq_tyvar tv) cl_vars) && (aux t nI)
+      | (Lval (Llvar tv')) :: t -> (is_eq_tyvar tv tv') || (aux t nI)
+      | _ :: t -> (aux t nI)
+      in
+    match node with
     | None -> true
-    | Some n -> not (in_args n.nkind.iargs) && (unused_lval tv (getNextI n))
+    | Some node -> aux node.nkind.iargs (getNextI node)
 
   let rec nop_uinst cfg ret_vars node =
     let nI = getNextI node in

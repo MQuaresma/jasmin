@@ -1470,8 +1470,8 @@ module X86BaseOpS : BaseOp
   let (!) e = I.mk_lval_atome e
 
   let assgn_to_instr _annot x e =
-    let a = I.gexp_to_atome  e in
-    let l = I.glval_to_lval  x in
+    let a = I.gexp_to_atome e in
+    let l = I.glval_to_lval x in
     [CL.Instr.Op1.mov l a]
 
   let op_to_instr annot loc xs o es =
