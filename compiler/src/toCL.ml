@@ -684,6 +684,13 @@ module I (S:S): I = struct
               (Pconst (w2i ~sign z U64))
         | _ -> !> v
       end
+    | PappN (Oabstract {pa_name="u256i"}, [v]) ->
+      begin
+        match v with
+        | Papp1 (Oword_of_int _ws, Pconst z) ->  !>
+              (Pconst (w2i ~sign z U256))
+        | _ -> !> v
+      end
     | PappN (Oabstract {pa_name="b2i"}, [v]) -> !> v
     | PappN (Oabstract {pa_name="mon"}, [c;a;b]) ->
       let c = get_const c in

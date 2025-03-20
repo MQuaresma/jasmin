@@ -312,6 +312,19 @@ module GhostVector = struct
       let vl = build_tyvar_list 16 [] in
       move_to_vghost vl vghost
 
+    let extract_vector_ghosts formals vghost =
+      let (v, ty) = vghost in
+      let rec build_tyvar_list i acc =
+        match i with
+        | 0 -> acc
+        | n ->
+          let name = get_unfolded_vector_namei v (i-1) in
+          let v' = get_vghost formals name in
+          build_tyvar_list (n - 1) (v' :: acc)
+        in
+      let vl = build_tyvar_list 16 [] in
+      move_from_vghost vl vghost
+
     let unfold_clauses node formals =
       match node with
       | {iname = "assert"; iargs = [Pred (ep, rp)]} ->
@@ -325,7 +338,8 @@ module GhostVector = struct
         let rp', l2 = unfold_vghosts_rpred formals rp in
         let l = remove_dups (l1 @ l2) in
         let prel = List.fold_right (fun x l -> (inject_vector_ghosts formals x) @ l) l [] in
-        prel @ [{iname = "assume"; iargs = [Pred (ep',rp')]}]
+        let postl = List.fold_right (fun x l -> (extract_vector_ghosts formals x) @ l) l [] in
+        prel @ [{iname = "assume"; iargs = [Pred (ep',rp')]}] @ postl
       | {iname = "cut"; iargs = [Pred (ep, rp)]} ->
         let ep', l1 = unfold_vghosts_epred formals ep in
         let rp', l2 = unfold_vghosts_rpred formals rp in
@@ -764,7 +778,13 @@ module SimplVector = struct
       | (Pred (el, rl)) :: t ->
         let cl_vars = get_clause_vars el rl in
         not(List.exists (is_eq_tyvar tv) cl_vars) && (aux t nI)
-      | (Lval (Llvar tv')) :: t -> (is_eq_tyvar tv tv') || (aux t nI)
+      | (Lval (Llvar tv')) :: t ->  aux t nI (* FIXME *)
+        (* if (is_eq_tyvar tv tv') then
+          if node.iname != "mov" || node.iname != "cast" then
+            aux t nI
+          else
+            true
+        else aux t nI *)
       | _ :: t -> (aux t nI)
       in
     match node with
